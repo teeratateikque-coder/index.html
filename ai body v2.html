@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Body Measurement System</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f9;
+            padding: 20px;
+            text-align: center;
+        }
+
+        h1 {
+            margin-bottom: 15px;
+        }
+
+        .controls {
+            margin-bottom: 15px;
+        }
+
+        select, button {
+            padding: 10px;
+            margin: 5px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        .wrapper {
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
+        }
+
+        video {
+            width: 100%;
+            max-width: 900px;
+            border-radius: 12px;
+            background: black;
+        }
+
+        canvas {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .results {
+            margin-top: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        .results p {
+            margin: 10px 0;
+            font-size: 18px;
+        }
+
+        .status {
+            margin-top: 10px;
+            color: green;
+            font-weight: bold;
+        }
+
+        @media(max-width: 768px) {
+            .results p {
+                font-size: 16px;
+            }
+            select, button {
+                width: 100%;
+                max-width: 350px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>AI Body Measurement System</h1>
+
+    <div class="controls">
+        <select id="cameraSelect"></select>
+        <button onclick="startSelectedCamera()">Start Camera</button>
+    </div>
+
+    <div class="wrapper">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="results">
+        <p>Height: <span id="height">--</span></p>
+        <p>Weight: <span id="weight">--</span></p>
+        <p>BMI: <span id="bmi">--</span></p>
+        <p>Detection: <span id="personStatus">Waiting...</span></p>
+    </div>
+
+    <div class="status" id="status">Loading...</div>
+
+    <script>
+        let detector;
+        let currentStream;
+        let isLoopRunning = false;
+
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const cameraSelect = document.getElementById("cameraSelect");
+
+        async function loadModels() {
+            detector = await poseDetection.createDetector(
+                poseDetection.SupportedModels.BlazePose,
+                {
+                    runtime: 'mediapipe',
+                    modelType: 'full',
+                    solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose'
+                }
+            );
+            document.getElementById("status").innerText = "AI Model Loaded";
+        }
+
+        async function loadCameras() {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const cameras = devices.filter(d => d.kind === "videoinput");
+            
+            cameraSelect.innerHTML = "";
+            cameras.forEach((camera, index) => {
+                const option = document.createElement("option");
+                option.value = camera.deviceId;
+                option.text = camera.label || `Camera ${index + 1}`;
+                cameraSelect.appendChild(option);
+            });
+        }
+
+        async function startSelectedCamera() {
+            try {
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                }
+
+                const deviceId = cameraSelect.value;
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: deviceId ? { exact: deviceId } : {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: false
+                });
+
+                currentStream = stream;
+                video.srcObject = stream;
+                await video.play();
+
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+
+                if (!isLoopRunning) {
+                    isLoopRunning = true;
+                    detect();
+                }
+            } catch (error) {
+                alert("Unable to access camera.\n" + error.message);
+            }
+        }
+
+        function estimateHeight(keypoints) {
+            const getPt = (idx) => {
+                const kp = keypoints[idx];
+                if (!kp) return null;
+                const score = kp.score !== undefined ? kp.score : 0.5;
+                return score > 0.15 ? { x: kp.x, y: (kp.y <= 1 ? kp.y * video.videoHeight : kp.y) } : null;
+            };
+
+            const nose = getPt(0);
+            const leftEye = getPt(1);
+            const rightEye = getPt(2);
+            const leftShoulder = getPt(11);
+            const rightShoulder = getPt(12);
+            const leftHip = getPt(23);
+            const rightHip = getPt(24);
+            const leftAnkle = getPt(27);
+            const rightAnkle = getPt(28);
+
+            // FALLBACK LEVEL 1: Full Body (Nose to Ankles)
+            if (nose && leftAnkle && rightAnkle) {
+                const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
+                const pixelHeight = ankleY - nose.y;
+                if (pixelHeight > 40) return Math.round(pixelHeight * 0.38);
+            }
+
+            // FALLBACK LEVEL 2: Half Body (Nose to Hips)
+            if (nose && leftHip && rightHip) {
+                const hipY = (leftHip.y + rightHip.y) / 2;
+                const noseToHip = hipY - nose.y;
+                if (noseToHip > 30) return Math.round((noseToHip * 2.3) * 0.38);
+            }
+
+            // FALLBACK LEVEL 3: Close-up Upper Body (Eyes/Nose to Shoulders)
+            if ((nose || leftEye || rightEye) && leftShoulder && rightShoulder) {
+                const topY = nose ? nose.y : (leftEye.y + rightEye.y) / 2;
+                const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+                const headToShoulder = shoulderY - topY;
+                if (headToShoulder > 10) {
+                    return Math.round((headToShoulder * 7.2) * 0.38);
+                }
+            }
+
+            return null;
+        }
+
+        function estimateWeight(height) {
+            if (!height || height < 100) return 0;
+            const targetBmi = 22.0; 
+            const meters = height / 100;
+            return Math.round(targetBmi * (meters * meters));
+        }
+
+        function drawPoint(x, y) {
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = "red";
+            ctx.fill();
+        }
+
+        function drawLine(a, b) {
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "lime";
+            ctx.stroke();
+        }
+
+        function drawSkeleton(pose) {
+            const points = pose.keypoints;
+
+            points.forEach(point => {
+                const score = point.score !== undefined ? point.score : 0.5;
+                if (score > 0.15) {
+                    drawPoint(point.x, point.y);
+                }
+            });
+
+            const pairs = [
+                [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+                [11, 23], [12, 24], [23, 24], [23, 25], [25, 27],
+                [24, 26], [26, 28]
+            ];
+
+            pairs.forEach(pair => {
+                const a = points[pair[0]];
+                const b = points[pair[1]];
+                if (a && b) {
+                    const aScore = a.score !== undefined ? a.score : 0.5;
+                    const bScore = b.score !== undefined ? b.score : 0.5;
+                    if (aScore > 0.15 && bScore > 0.15) {
+                        drawLine(a, b);
+                    }
+                }
+            });
+        }
+
+        async function detect() {
+            if (!detector || video.readyState < 2) {
+                requestAnimationFrame(detect);
+                return;
+            }
+
+            try {
+                const poses = await detector.estimatePoses(video);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (poses && poses.length > 0) {
+                    const pose = poses[0];
+                    drawSkeleton(pose);
+
+                    document.getElementById("personStatus").innerText = "Person Detected";
+                    let height = estimateHeight(pose.keypoints);
+
+                    if (height && height >= 90 && height <= 240) {
+                        const weight = estimateWeight(height);
+                        const meters = height / 100;
+                        const bmiValue = (weight / (meters * meters)).toFixed(1);
+
+                        document.getElementById("height").innerText = height + " cm";
+                        document.getElementById("weight").innerText = weight + " kg";
+                        document.getElementById("bmi").innerText = bmiValue;
+                    } else {
+                        document.getElementById("height").innerText = "--";
+                        document.getElementById("weight").innerText = "--";
+                        document.getElementById("bmi").innerText = "--";
+                    }
+                } else {
+                    document.getElementById("personStatus").innerText = "No Person Detected";
+                    document.getElementById("height").innerText = "--";
+                    document.getElementById("weight").innerText = "--";
+                    document.getElementById("bmi").innerText = "--";
+                }
+            } catch (err) {
+                console.error("Detection error:", err);
+            }
+
+            requestAnimationFrame(detect);
+        }
+
+        async function init() {
+            try {
+                await loadModels();
+                await loadCameras();
+                await startSelectedCamera();
+            } catch (error) {
+                document.getElementById("status").innerText = "Error initialization system";
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

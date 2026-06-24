@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Body Measurement System</title>
 
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.2.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.2.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.2.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
 
     <style>
         * {
@@ -60,6 +60,7 @@
             max-width: 900px;
             border-radius: 12px;
             background: black;
+            display: block;
         }
 
         .mirror {
@@ -72,6 +73,7 @@
             top: 0;
             width: 100%;
             height: 100%;
+            pointer-events: none;
         }
 
         .results {
@@ -92,7 +94,7 @@
 
         .status {
             margin-top: 10px;
-            color: green;
+            color: #007bff;
             font-weight: bold;
         }
     </style>
@@ -117,7 +119,7 @@
         <p>Detection: <span id="personStatus">Waiting...</span></p>
     </div>
 
-    <div class="status" id="status">Loading AI Models...</div>
+    <div class="status" id="status">Initializing Environment...</div>
 
     <script>
         let detector;
@@ -130,18 +132,12 @@
         const ctx = canvas.getContext("2d");
         const switchBtn = document.getElementById("switchBtn");
 
-        async function initBackend() {
+        async function initSystem() {
             try {
+                document.getElementById("status").innerText = "Setting up backend...";
                 await tf.setBackend('webgl');
-                await tf.ready();
-            } catch (e) {
-                console.error("WebGL initialization failed, falling back to CPU", e);
-            }
-        }
-
-        async function loadModels() {
-            try {
-                await initBackend();
+                
+                document.getElementById("status").innerText = "Loading AI Model...";
                 detector = await poseDetection.createDetector(
                     poseDetection.SupportedModels.BlazePose,
                     {
@@ -149,11 +145,14 @@
                         modelType: 'full'
                     }
                 );
-                document.getElementById("status").innerText = "AI Model Loaded";
+                
+                document.getElementById("status").innerText = "AI System Ready";
                 await startCamera(currentFacingMode);
             } catch (err) {
-                document.getElementById("status").innerText = "Failed to load AI model";
+                document.getElementById("status").innerText = "Initialization Failed: " + err.message;
                 console.error(err);
+                // Last resort fallback to try loading camera anyway
+                await startCamera(currentFacingMode);
             }
         }
 
@@ -166,10 +165,11 @@
                 currentStream.getTracks().forEach(track => track.stop());
             }
 
+            // Using unconstrained fallback strategy for older mobile browsers to prevent freezing
             const constraints = {
                 audio: false,
                 video: {
-                    facingMode: facingMode
+                    facingMode: { ideal: facingMode }
                 }
             };
 
@@ -183,8 +183,11 @@
 
                 await video.play();
 
-                canvas.width = video.videoWidth || 640;
-                canvas.height = video.videoHeight || 480;
+                // Dynamic dimensions assignment to fix 0x0 canvas drawing issue on layout rendering
+                setTimeout(() => {
+                    canvas.width = video.videoWidth || 640;
+                    canvas.height = video.videoHeight || 480;
+                }, 300);
 
                 if (facingMode === "user") {
                     video.classList.add("mirror");
@@ -196,6 +199,7 @@
             } catch (error) {
                 console.error("Camera access error:", error);
                 try {
+                    // Maximum open fallback standard constraint
                     currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                     video.srcObject = currentStream;
                     await video.play();
@@ -203,7 +207,7 @@
                     canvas.height = video.videoHeight || 480;
                     detect();
                 } catch (e) {
-                    alert("Cannot access any camera. Please check web permissions.");
+                    document.getElementById("status").innerText = "Camera Permission Denied";
                 }
             }
         }
@@ -219,6 +223,7 @@
                 const kp = keypoints[idx];
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
+                // Normalized coordinate conversion boundary protection
                 return score > 0.10 ? { x: kp.x, y: (kp.y <= 1 ? kp.y * videoH : kp.y) } : null;
             };
 
@@ -257,7 +262,7 @@
         }
 
         function estimateWeight(height) {
-            if (!height || height < 90) return 0;
+            if (!height || height < 100) return 0;
             const targetBmi = 22.0; 
             const meters = height / 100;
             return Math.round(targetBmi * (meters * meters));
@@ -324,40 +329,42 @@
         }
 
         async function detect() {
-            if (!detector || video.readyState < 2) {
+            if (video.readyState < 2) {
                 animationFrameId = requestAnimationFrame(detect);
                 return;
             }
 
             try {
-                const poses = await detector.estimatePoses(video);
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (detector) {
+                    const poses = await detector.estimatePoses(video);
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                if (poses && poses.length > 0) {
-                    const pose = poses[0];
-                    drawSkeleton(pose);
+                    if (poses && poses.length > 0) {
+                        const pose = poses[0];
+                        drawSkeleton(pose);
 
-                    document.getElementById("personStatus").innerText = "Person Detected";
-                    let height = estimateHeight(pose.keypoints);
+                        document.getElementById("personStatus").innerText = "Person Detected";
+                        let height = estimateHeight(pose.keypoints);
 
-                    if (height && height >= 50 && height <= 250) {
-                        const weight = estimateWeight(height);
-                        const meters = height / 100;
-                        const bmiValue = (weight / (meters * meters)).toFixed(1);
+                        if (height && height >= 90 && height <= 240) {
+                            const weight = estimateWeight(height);
+                            const meters = height / 100;
+                            const bmiValue = (weight / (meters * meters)).toFixed(1);
 
-                        document.getElementById("height").innerText = height + " cm";
-                        document.getElementById("weight").innerText = weight + " kg";
-                        document.getElementById("bmi").innerText = bmiValue;
+                            document.getElementById("height").innerText = height + " cm";
+                            document.getElementById("weight").innerText = weight + " kg";
+                            document.getElementById("bmi").innerText = bmiValue;
+                        } else {
+                            document.getElementById("height").innerText = "--";
+                            document.getElementById("weight").innerText = "--";
+                            document.getElementById("bmi").innerText = "--";
+                        }
                     } else {
+                        document.getElementById("personStatus").innerText = "No Person Detected";
                         document.getElementById("height").innerText = "--";
                         document.getElementById("weight").innerText = "--";
                         document.getElementById("bmi").innerText = "--";
                     }
-                } else {
-                    document.getElementById("personStatus").innerText = "No Person Detected";
-                    document.getElementById("height").innerText = "--";
-                    document.getElementById("weight").innerText = "--";
-                    document.getElementById("bmi").innerText = "--";
                 }
             } catch (err) {
                 console.error("Detection error:", err);
@@ -366,7 +373,7 @@
             animationFrameId = requestAnimationFrame(detect);
         }
 
-        loadModels();
+        initSystem();
     </script>
 </body>
 </html>

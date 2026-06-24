@@ -36,10 +36,14 @@
             margin: 5px;
             border-radius: 8px;
             border: 1px solid #ccc;
+            font-size: 14px;
         }
 
         button {
             cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
         }
 
         .wrapper {
@@ -53,6 +57,11 @@
             max-width: 900px;
             border-radius: 12px;
             background: black;
+            transform: scaleX(1); 
+        }
+
+        .mirror {
+            transform: scaleX(-1);
         }
 
         canvas {
@@ -101,7 +110,10 @@
     <h1>AI Body Measurement System</h1>
 
     <div class="controls">
-        <select id="cameraSelect"></select>
+        <select id="cameraSelect">
+            <option value="user">Front Camera (Default)</option>
+            <option value="environment">Rear Camera</option>
+        </select>
         <button onclick="startSelectedCamera()">Start Camera</button>
     </div>
 
@@ -142,16 +154,23 @@
         }
 
         async function loadCameras() {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const cameras = devices.filter(d => d.kind === "videoinput");
-            
-            cameraSelect.innerHTML = "";
-            cameras.forEach((camera, index) => {
-                const option = document.createElement("option");
-                option.value = camera.deviceId;
-                option.text = camera.label || `Camera ${index + 1}`;
-                cameraSelect.appendChild(option);
-            });
+            try {
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const cameras = devices.filter(d => d.kind === "videoinput");
+                
+                if (cameras.length > 0) {
+                    cameraSelect.innerHTML = "";
+                    cameras.forEach((camera, index) => {
+                        const option = document.createElement("option");
+                        option.value = camera.deviceId;
+                        option.text = camera.label || `Camera ${index + 1}`;
+                        cameraSelect.appendChild(option);
+                    });
+                }
+            } catch (e) {
+                console.log("Using default facingMode options due to permission or device limits.");
+            }
         }
 
         async function startSelectedCamera() {
@@ -160,12 +179,20 @@
                     currentStream.getTracks().forEach(track => track.stop());
                 }
 
-                const deviceId = cameraSelect.value;
+                const selectedValue = cameraSelect.value;
+                let videoConstraints = {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                };
+
+                if (selectedValue === "user" || selectedValue === "environment") {
+                    videoConstraints.facingMode = { exact: selectedValue };
+                } else {
+                    videoConstraints.deviceId = { exact: selectedValue };
+                }
+
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: deviceId ? { exact: deviceId } : {
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    },
+                    video: videoConstraints,
                     audio: false
                 });
 
@@ -176,11 +203,37 @@
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
 
+                const track = stream.getVideoTracks()[0];
+                const settings = track.getSettings ? track.getSettings() : {};
+                if (settings.facingMode === "user" || selectedValue === "user") {
+                    video.classList.add("mirror");
+                } else {
+                    video.classList.remove("mirror");
+                }
+
                 if (!isLoopRunning) {
                     isLoopRunning = true;
                     detect();
                 }
             } catch (error) {
+                if (cameraSelect.value === "environment" || cameraSelect.value === "user") {
+                    try {
+                        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+                            video: { facingMode: cameraSelect.value },
+                            audio: false
+                        });
+                        currentStream = fallbackStream;
+                        video.srcObject = fallbackStream;
+                        await video.play();
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        if (!isLoopRunning) {
+                            isLoopRunning = true;
+                            detect();
+                        }
+                        return;
+                    } catch (err) {}
+                }
                 alert("Unable to access camera.\n" + error.message);
             }
         }
@@ -203,21 +256,18 @@
             const leftAnkle = getPt(27);
             const rightAnkle = getPt(28);
 
-            // FALLBACK LEVEL 1: Full Body (Nose to Ankles)
             if (nose && leftAnkle && rightAnkle) {
                 const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
                 const pixelHeight = ankleY - nose.y;
                 if (pixelHeight > 40) return Math.round(pixelHeight * 0.38);
             }
 
-            // FALLBACK LEVEL 2: Half Body (Nose to Hips)
             if (nose && leftHip && rightHip) {
                 const hipY = (leftHip.y + rightHip.y) / 2;
                 const noseToHip = hipY - nose.y;
                 if (noseToHip > 30) return Math.round((noseToHip * 2.3) * 0.38);
             }
 
-            // FALLBACK LEVEL 3: Close-up Upper Body (Eyes/Nose to Shoulders)
             if ((nose || leftEye || rightEye) && leftShoulder && rightShoulder) {
                 const topY = nose ? nose.y : (leftEye.y + rightEye.y) / 2;
                 const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
@@ -255,11 +305,17 @@
 
         function drawSkeleton(pose) {
             const points = pose.keypoints;
+            const isMirrored = video.classList.contains("mirror");
 
             points.forEach(point => {
                 const score = point.score !== undefined ? point.score : 0.5;
                 if (score > 0.15) {
-                    drawPoint(point.x, point.y);
+                    let drawX = point.x <= 1 ? point.x * canvas.width : point.x;
+                    let drawY = point.y <= 1 ? point.y * canvas.height : point.y;
+                    if (isMirrored) {
+                        drawX = canvas.width - drawX;
+                    }
+                    drawPoint(drawX, drawY);
                 }
             });
 
@@ -276,7 +332,16 @@
                     const aScore = a.score !== undefined ? a.score : 0.5;
                     const bScore = b.score !== undefined ? b.score : 0.5;
                     if (aScore > 0.15 && bScore > 0.15) {
-                        drawLine(a, b);
+                        let ax = a.x <= 1 ? a.x * canvas.width : a.x;
+                        let ay = a.y <= 1 ? a.y * canvas.height : a.y;
+                        let bx = b.x <= 1 ? b.x * canvas.width : b.x;
+                        let by = b.y <= 1 ? b.y * canvas.height : b.y;
+
+                        if (isMirrored) {
+                            ax = canvas.width - ax;
+                            bx = canvas.width - bx;
+                        }
+                        drawLine({x: ax, y: ay}, {x: bx, y: by});
                     }
                 }
             });

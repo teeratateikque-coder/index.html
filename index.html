@@ -31,19 +31,21 @@
             margin-bottom: 15px;
         }
 
-        select, button {
-            padding: 10px;
+        button {
+            padding: 12px 24px;
             margin: 5px;
             border-radius: 8px;
-            border: 1px solid #ccc;
-            font-size: 14px;
-        }
-
-        button {
+            font-size: 16px;
             cursor: pointer;
             background: #007bff;
             color: white;
             border: none;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        button:active {
+            background: #0056b3;
         }
 
         .wrapper {
@@ -57,7 +59,6 @@
             max-width: 900px;
             border-radius: 12px;
             background: black;
-            transform: scaleX(1); 
         }
 
         .mirror {
@@ -93,16 +94,6 @@
             color: green;
             font-weight: bold;
         }
-
-        @media(max-width: 768px) {
-            .results p {
-                font-size: 16px;
-            }
-            select, button {
-                width: 100%;
-                max-width: 350px;
-            }
-        }
     </style>
 </head>
 <body>
@@ -110,11 +101,7 @@
     <h1>AI Body Measurement System</h1>
 
     <div class="controls">
-        <select id="cameraSelect">
-            <option value="user">Front Camera</option>
-            <option value="environment" selected>Rear Camera</option>
-        </select>
-        <button onclick="startSelectedCamera()">Start Camera</button>
+        <button id="switchBtn" onclick="toggleCamera()">Switch to Rear Camera</button>
     </div>
 
     <div class="wrapper">
@@ -129,108 +116,98 @@
         <p>Detection: <span id="personStatus">Waiting...</span></p>
     </div>
 
-    <div class="status" id="status">Loading...</div>
+    <div class="status" id="status">Loading AI Models...</div>
 
     <script>
         let detector;
         let currentStream;
         let isLoopRunning = false;
+        let currentFacingMode = "user"; // เริ่มต้นที่กล้องหน้าเพื่อให้เปิดง่ายที่สุดก่อน
 
         const video = document.getElementById("video");
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
-        const cameraSelect = document.getElementById("cameraSelect");
+        const switchBtn = document.getElementById("switchBtn");
 
         async function loadModels() {
-            detector = await poseDetection.createDetector(
-                poseDetection.SupportedModels.BlazePose,
-                {
-                    runtime: 'mediapipe',
-                    modelType: 'full',
-                    solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose'
-                }
-            );
-            document.getElementById("status").innerText = "AI Model Loaded";
-        }
-
-        async function loadCameras() {
             try {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const cameras = devices.filter(d => d.kind === "videoinput");
-                
-                if (cameras.length > 2) {
-                    cameraSelect.innerHTML = "";
-                    cameras.forEach((camera, index) => {
-                        const option = document.createElement("option");
-                        option.value = camera.deviceId;
-                        let label = camera.label || `Camera ${index + 1}`;
-                        if (label.toLowerCase().includes("back") || label.toLowerCase().includes("rear") || label.toLowerCase().includes("environment")) {
-                            option.selected = true;
-                        }
-                        option.text = label;
-                        cameraSelect.appendChild(option);
-                    });
-                }
-            } catch (e) {
-                console.log("Using standard facingMode toggles.");
+                detector = await poseDetection.createDetector(
+                    poseDetection.SupportedModels.BlazePose,
+                    {
+                        runtime: 'mediapipe',
+                        modelType: 'full',
+                        solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose'
+                    }
+                );
+                document.getElementById("status").innerText = "AI Model Loaded";
+                // หลังจากโมเดลโหลดเสร็จ ค่อยสั่งเปิดกล้องตัวแรก
+                await startCamera(currentFacingMode);
+            } catch (err) {
+                document.getElementById("status").innerText = "Failed to load AI model";
+                console.error(err);
             }
         }
 
-        async function startSelectedCamera() {
+        async function startCamera(facingMode) {
+            // สำคัญที่สุด: ต้อง Stop สตรีมเดิมทุกแทร็กก่อนเปิดกล้องตัวใหม่ ไม่งั้นกล้องหลังจะจอดำเพราะสิทธิ์ทับซ้อนกัน
             if (currentStream) {
                 currentStream.getTracks().forEach(track => track.stop());
             }
 
-            const target = cameraSelect.value;
-            let constraints = { audio: false, video: { width: { ideal: 1280 }, height: { ideal: 720 } } };
-
-            // จัดการเงื่อนไขเปิดกล้องหลังแบบยืดหยุ่นสูงพิเศษเพื่อป้องกันระบบ iOS/Android บล็อกกล้อง
-            if (target === "user" || target === "environment") {
-                constraints.video.facingMode = target;
-            } else {
-                constraints.video.deviceId = { exact: target };
-            }
+            const constraints = {
+                audio: false,
+                video: {
+                    facingMode: facingMode,
+                    width: { ideal: 640 }, // ปรับ Resolution ลงมาเล็กน้อยเพื่อให้กล้องหลังของมือถือรันระบบ AI ได้ลื่นและไม่ดับ
+                    height: { ideal: 480 }
+                }
+            };
 
             try {
                 currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-            } catch (err) {
-                console.log("Primary constraint failed, trying fallback mode...");
-                // แผนสำรองกรณีเรียกหาตรงตัวสลับไม่ได้ (เช่น เจอกล้องหลังแบบ Ultra-wide บน iOS)
-                if (target === "environment" || target === "user") {
-                    try {
-                        constraints.video.facingMode = { ideal: target };
-                        delete constraints.video.width;
-                        delete constraints.video.height;
-                        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-                    } catch (fallbackErr) {
-                        // ปลดล็อกทุกอย่างและใช้กล้องใดก็ได้ที่เปิดได้
-                        currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                    }
+                video.srcObject = currentStream;
+                
+                // รอให้ข้อมูลวิดีโอถูกโหลดเข้ามาเต็มที่
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => resolve();
+                });
+
+                await video.play();
+
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+
+                // จัดการเรื่องการกลับด้านรูปภาพ (Mirror) ให้สัมพันธ์กับกล้องที่ใช้
+                if (facingMode === "user") {
+                    video.classList.add("mirror");
+                    switchBtn.innerText = "Switch to Rear Camera";
                 } else {
-                    alert("Unable to access camera: " + err.message);
-                    return;
+                    video.classList.remove("mirror");
+                    switchBtn.innerText = "Switch to Front Camera";
+                }
+
+                if (!isLoopRunning) {
+                    isLoopRunning = true;
+                    detect();
+                }
+            } catch (error) {
+                console.error("Camera access error:", error);
+                // แผนสำรองสุดท้าย: ถ้าล็อกสายกล้องหลังไม่ได้ ให้เปิดกล้องอะไรก็ได้ที่เปิดได้ก่อน
+                try {
+                    currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    video.srcObject = currentStream;
+                    await video.play();
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                } catch (e) {
+                    alert("Cannot access any camera. Please check web permissions.");
                 }
             }
+        }
 
-            video.srcObject = currentStream;
-            await video.play();
-
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-
-            // ตรวจสอบเงื่อนไขกระจกเงา (ส่องหน้าตัวเองต้องเปิด Mirror, ส่องข้างนอกต้องปิด Mirror)
-            const track = currentStream.getVideoTracks()[0];
-            const settings = track.getSettings ? track.getSettings() : {};
-            if (settings.facingMode === "user" || target === "user") {
-                video.classList.add("mirror");
-            } else {
-                video.classList.remove("mirror");
-            }
-
-            if (!isLoopRunning) {
-                isLoopRunning = true;
-                detect();
-            }
+        async function toggleCamera() {
+            currentFacingMode = (currentFacingMode === "user") ? "environment" : "user";
+            await startCamera(currentFacingMode);
         }
 
         function estimateHeight(keypoints) {
@@ -385,17 +362,8 @@
             requestAnimationFrame(detect);
         }
 
-        async function init() {
-            try {
-                await loadModels();
-                await loadCameras();
-                await startSelectedCamera();
-            } catch (error) {
-                document.getElementById("status").innerText = "Error initialization system";
-            }
-        }
-
-        init();
+        // เริ่มต้นทำงานระบบโมเดลก่อน
+        loadModels();
     </script>
 </body>
 </html>

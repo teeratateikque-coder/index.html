@@ -6,9 +6,8 @@
     <title>AI Body Measurement System</title>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.2.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.2.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.2.0"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.2.0"></script>
 
     <style>
         * {
@@ -32,11 +31,15 @@
             margin-bottom: 15px;
         }
 
-        button {
-            padding: 12px 24px;
+        select, button {
+            padding: 12px 20px;
             margin: 5px;
             border-radius: 8px;
             font-size: 16px;
+            border: 1px solid #ccc;
+        }
+
+        button {
             cursor: pointer;
             background: #007bff;
             color: white;
@@ -104,7 +107,8 @@
     <h1>AI Body Measurement System</h1>
 
     <div class="controls">
-        <button id="switchBtn" onclick="toggleCamera()">Switch Camera</button>
+        <select id="cameraSelect"></select>
+        <button id="startBtn" onclick="startSelectedCamera()">Start Camera</button>
     </div>
 
     <div class="wrapper">
@@ -119,102 +123,140 @@
         <p>Detection: <span id="personStatus">Waiting...</span></p>
     </div>
 
-    <div class="status" id="status">Initializing Environment...</div>
+    <div class="status" id="status">Initializing...</div>
 
     <script>
         let detector;
         let currentStream;
         let animationFrameId;
-        let currentFacingMode = "user";
 
         const video = document.getElementById("video");
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
-        const switchBtn = document.getElementById("switchBtn");
+        const cameraSelect = document.getElementById("cameraSelect");
 
         async function initSystem() {
             try {
-                document.getElementById("status").innerText = "Setting up backend...";
-                await tf.setBackend('webgl');
-                
                 document.getElementById("status").innerText = "Loading AI Model...";
+                await tf.setBackend('webgl');
                 detector = await poseDetection.createDetector(
                     poseDetection.SupportedModels.BlazePose,
-                    {
-                        runtime: 'tfjs',
-                        modelType: 'full'
-                    }
+                    { runtime: 'tfjs', modelType: 'full' }
                 );
-                
                 document.getElementById("status").innerText = "AI System Ready";
-                await startCamera(currentFacingMode);
+                
+                await loadCameras();
             } catch (err) {
-                document.getElementById("status").innerText = "Initialization Failed: " + err.message;
+                document.getElementById("status").innerText = "Init Failed: " + err.message;
                 console.error(err);
-                // Last resort fallback to try loading camera anyway
-                await startCamera(currentFacingMode);
             }
         }
 
-        async function startCamera(facingMode) {
-            if (animationFrameId) {
-                cancelAnimationFrame(animationFrameId);
-            }
+        async function loadCameras() {
+            try {
+                // Request initial permissions to get device labels
+                const initStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                initStream.getTracks().forEach(track => track.stop());
 
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(d => d.kind === "videoinput");
+
+                cameraSelect.innerHTML = "";
+                videoDevices.forEach((device, index) => {
+                    const option = document.createElement("option");
+                    option.value = device.deviceId;
+                    
+                    // Store facing information in data attribute for accurate fallback switching
+                    const label = device.label.toLowerCase();
+                    if (label.includes("back") || label.includes("rear") || label.includes("environment")) {
+                        option.setAttribute("data-facing", "environment");
+                    } else {
+                        option.setAttribute("data-facing", "user");
+                    }
+
+                    option.text = device.label || `Camera ${index + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+
+                if (videoDevices.length > 0) {
+                    await startSelectedCamera();
+                }
+            } catch (err) {
+                console.error("Error listing cameras:", err);
+                // Fallback options if enumerateDevices is blocked
+                cameraSelect.innerHTML = `
+                    <option value="user" data-facing="user">Front Camera</option>
+                    <option value="environment" data-facing="environment">Rear Camera</option>
+                `;
+                await startSelectedCamera();
+            }
+        }
+
+        async function startSelectedCamera() {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            
             if (currentStream) {
                 currentStream.getTracks().forEach(track => track.stop());
             }
+            
+            video.srcObject = null;
 
-            // Using unconstrained fallback strategy for older mobile browsers to prevent freezing
-            const constraints = {
+            const selectedOption = cameraSelect.options[cameraSelect.selectedIndex];
+            if (!selectedOption) return;
+
+            const deviceId = selectedOption.value;
+            const facingMode = selectedOption.getAttribute("data-facing");
+
+            // Multi-stage robust constraints to prevent mobile browser deviceId bugs
+            let constraints = {
                 audio: false,
-                video: {
-                    facingMode: { ideal: facingMode }
-                }
+                video: { deviceId: { exact: deviceId } }
             };
+
+            // If it's a generic fallback value
+            if (deviceId === "user" || deviceId === "environment") {
+                constraints.video = { facingMode: { ideal: deviceId } };
+            }
 
             try {
                 currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-                video.srcObject = currentStream;
-                
-                await new Promise((resolve) => {
-                    video.onloadedmetadata = () => resolve();
-                });
-
-                await video.play();
-
-                // Dynamic dimensions assignment to fix 0x0 canvas drawing issue on layout rendering
-                setTimeout(() => {
-                    canvas.width = video.videoWidth || 640;
-                    canvas.height = video.videoHeight || 480;
-                }, 300);
-
-                if (facingMode === "user") {
-                    video.classList.add("mirror");
-                } else {
-                    video.classList.remove("mirror");
-                }
-
-                detect();
-            } catch (error) {
-                console.error("Camera access error:", error);
+            } catch (err) {
+                console.warn("Primary deviceId constraint failed. Trying facingMode fallback...", err);
                 try {
-                    // Maximum open fallback standard constraint
+                    // Fallback using explicit facingMode instead of deviceId
+                    currentStream = await navigator.mediaDevices.getUserMedia({
+                        audio: false,
+                        video: { facingMode: { ideal: facingMode } }
+                    });
+                } catch (fallbackErr) {
+                    console.error("All constraints failed. Using default camera.", fallbackErr);
                     currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                    video.srcObject = currentStream;
-                    await video.play();
-                    canvas.width = video.videoWidth || 640;
-                    canvas.height = video.videoHeight || 480;
-                    detect();
-                } catch (e) {
-                    document.getElementById("status").innerText = "Camera Permission Denied";
                 }
             }
-        }
 
-        async function toggleCamera() {
-            currentFacingMode = (currentFacingMode === "user") ? "environment" : "user";
-            await startCamera(currentFacingMode);
+            video.srcObject = currentStream;
+            
+            await new Promise((resolve) => {
+                video.onloadedmetadata = () => resolve();
+            });
+
+            await video.play();
+
+            // Handle mirror styling dynamically based on the track configuration
+            const activeTrack = currentStream.getVideoTracks()[0];
+            const settings = activeTrack.getSettings ? activeTrack.getSettings() : {};
+            const actualFacing = settings.facingMode || facingMode;
+
+            if (actualFacing === "user") {
+                video.classList.add("mirror");
+            } else {
+                video.classList.remove("mirror");
+            }
+
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+
+            detect();
         }
 
         function estimateHeight(keypoints) {
@@ -223,7 +265,6 @@
                 const kp = keypoints[idx];
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
-                // Normalized coordinate conversion boundary protection
                 return score > 0.10 ? { x: kp.x, y: (kp.y <= 1 ? kp.y * videoH : kp.y) } : null;
             };
 
@@ -257,7 +298,6 @@
                     return Math.round((headToShoulder * 7.2) * 0.38);
                 }
             }
-
             return null;
         }
 

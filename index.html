@@ -111,8 +111,8 @@
 
     <div class="controls">
         <select id="cameraSelect">
-            <option value="user">Front Camera (Default)</option>
-            <option value="environment">Rear Camera</option>
+            <option value="user">Front Camera</option>
+            <option value="environment" selected>Rear Camera</option>
         </select>
         <button onclick="startSelectedCamera()">Start Camera</button>
     </div>
@@ -155,86 +155,81 @@
 
         async function loadCameras() {
             try {
-                await navigator.mediaDevices.getUserMedia({ video: true });
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const cameras = devices.filter(d => d.kind === "videoinput");
                 
-                if (cameras.length > 0) {
+                if (cameras.length > 2) {
                     cameraSelect.innerHTML = "";
                     cameras.forEach((camera, index) => {
                         const option = document.createElement("option");
                         option.value = camera.deviceId;
-                        option.text = camera.label || `Camera ${index + 1}`;
+                        let label = camera.label || `Camera ${index + 1}`;
+                        if (label.toLowerCase().includes("back") || label.toLowerCase().includes("rear") || label.toLowerCase().includes("environment")) {
+                            option.selected = true;
+                        }
+                        option.text = label;
                         cameraSelect.appendChild(option);
                     });
                 }
             } catch (e) {
-                console.log("Using default facingMode options due to permission or device limits.");
+                console.log("Using standard facingMode toggles.");
             }
         }
 
         async function startSelectedCamera() {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            const target = cameraSelect.value;
+            let constraints = { audio: false, video: { width: { ideal: 1280 }, height: { ideal: 720 } } };
+
+            // จัดการเงื่อนไขเปิดกล้องหลังแบบยืดหยุ่นสูงพิเศษเพื่อป้องกันระบบ iOS/Android บล็อกกล้อง
+            if (target === "user" || target === "environment") {
+                constraints.video.facingMode = target;
+            } else {
+                constraints.video.deviceId = { exact: target };
+            }
+
             try {
-                if (currentStream) {
-                    currentStream.getTracks().forEach(track => track.stop());
-                }
-
-                const selectedValue = cameraSelect.value;
-                let videoConstraints = {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                };
-
-                if (selectedValue === "user" || selectedValue === "environment") {
-                    videoConstraints.facingMode = { exact: selectedValue };
-                } else {
-                    videoConstraints.deviceId = { exact: selectedValue };
-                }
-
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: videoConstraints,
-                    audio: false
-                });
-
-                currentStream = stream;
-                video.srcObject = stream;
-                await video.play();
-
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-
-                const track = stream.getVideoTracks()[0];
-                const settings = track.getSettings ? track.getSettings() : {};
-                if (settings.facingMode === "user" || selectedValue === "user") {
-                    video.classList.add("mirror");
-                } else {
-                    video.classList.remove("mirror");
-                }
-
-                if (!isLoopRunning) {
-                    isLoopRunning = true;
-                    detect();
-                }
-            } catch (error) {
-                if (cameraSelect.value === "environment" || cameraSelect.value === "user") {
+                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (err) {
+                console.log("Primary constraint failed, trying fallback mode...");
+                // แผนสำรองกรณีเรียกหาตรงตัวสลับไม่ได้ (เช่น เจอกล้องหลังแบบ Ultra-wide บน iOS)
+                if (target === "environment" || target === "user") {
                     try {
-                        const fallbackStream = await navigator.mediaDevices.getUserMedia({
-                            video: { facingMode: cameraSelect.value },
-                            audio: false
-                        });
-                        currentStream = fallbackStream;
-                        video.srcObject = fallbackStream;
-                        await video.play();
-                        canvas.width = video.videoWidth;
-                        canvas.height = video.videoHeight;
-                        if (!isLoopRunning) {
-                            isLoopRunning = true;
-                            detect();
-                        }
-                        return;
-                    } catch (err) {}
+                        constraints.video.facingMode = { ideal: target };
+                        delete constraints.video.width;
+                        delete constraints.video.height;
+                        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    } catch (fallbackErr) {
+                        // ปลดล็อกทุกอย่างและใช้กล้องใดก็ได้ที่เปิดได้
+                        currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    }
+                } else {
+                    alert("Unable to access camera: " + err.message);
+                    return;
                 }
-                alert("Unable to access camera.\n" + error.message);
+            }
+
+            video.srcObject = currentStream;
+            await video.play();
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // ตรวจสอบเงื่อนไขกระจกเงา (ส่องหน้าตัวเองต้องเปิด Mirror, ส่องข้างนอกต้องปิด Mirror)
+            const track = currentStream.getVideoTracks()[0];
+            const settings = track.getSettings ? track.getSettings() : {};
+            if (settings.facingMode === "user" || target === "user") {
+                video.classList.add("mirror");
+            } else {
+                video.classList.remove("mirror");
+            }
+
+            if (!isLoopRunning) {
+                isLoopRunning = true;
+                detect();
             }
         }
 

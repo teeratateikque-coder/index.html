@@ -207,12 +207,24 @@
         }
 
         function estimateHeight(keypoints) {
+            const videoW = video.videoWidth || 640;
             const videoH = video.videoHeight || 480;
+            
             const getPt = (idx) => {
                 const kp = keypoints[idx];
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
-                return score > 0.10 ? { x: kp.x, y: (kp.y <= 1.0001 ? kp.y * videoH : kp.y) } : null;
+                if (score > 0.10) {
+                    // ปรับปรุงสูตรแปลงพิกัด: ถ้าระบบส่งค่ามาเป็นเปอร์เซ็นต์ (0-1.5) ให้คูณแปลงเป็นพิกเซล หากส่งมาเป็นพิกเซลจริงอยู่แล้วให้ใช้ค่านั้นได้เลย
+                    let rx = kp.x;
+                    let ry = kp.y;
+                    if (rx <= 1.5 && ry <= 1.5 && rx >= -0.5 && ry >= -0.5) {
+                        rx = rx * videoW;
+                        ry = ry * videoH;
+                    }
+                    return { x: rx, y: ry };
+                }
+                return null;
             };
 
             const nose = getPt(0);
@@ -225,7 +237,7 @@
             const leftAnkle = getPt(27);
             const rightAnkle = getPt(28);
 
-            // 1. เห็นเต็มตัว (หัวถึงข้อเท้า)
+            // 1. เห็นเต็มตัว (ยืนตัวตรงชิดขอบก็สามารถวัดได้แล้ว)
             if (nose && leftAnkle && rightAnkle) {
                 const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
                 const pixelHeight = ankleY - nose.y;
@@ -261,7 +273,7 @@
         }
 
         function estimateWeight(height) {
-            if (!height || height < 50) return 0;
+            if (!height || height < 40) return 0;
             const targetBmi = 22.0; 
             const meters = height / 100;
             return Math.round(targetBmi * (meters * meters));
@@ -290,8 +302,14 @@
             points.forEach(point => {
                 const score = point.score !== undefined ? point.score : 0.5;
                 if (score > 0.10) {
-                    let drawX = point.x <= 1.0001 ? point.x * canvas.width : point.x;
-                    let drawY = point.y <= 1.0001 ? point.y * canvas.height : point.y;
+                    let drawX = point.x;
+                    let drawY = point.y;
+                    
+                    // ปรับเงื่อนไขการแปลงสเกลให้แมปปิ้งกับ Canvas ได้อย่างแม่นยำแม้จะยืนชนขอบเฟรมก็ตาม
+                    if (drawX <= 1.5 && drawY <= 1.5 && drawX >= -0.5 && drawY >= -0.5) {
+                        drawX = drawX * canvas.width;
+                        drawY = drawY * canvas.height;
+                    }
                     if (isMirrored) {
                         drawX = canvas.width - drawX;
                     }
@@ -312,10 +330,19 @@
                     const aScore = a.score !== undefined ? a.score : 0.5;
                     const bScore = b.score !== undefined ? b.score : 0.5;
                     if (aScore > 0.10 && bScore > 0.10) {
-                        let ax = a.x <= 1.0001 ? a.x * canvas.width : a.x;
-                        let ay = a.y <= 1.0001 ? a.y * canvas.height : a.y;
-                        let bx = b.x <= 1.0001 ? b.x * canvas.width : b.x;
-                        let by = b.y <= 1.0001 ? b.y * canvas.height : b.y;
+                        let ax = a.x;
+                        let ay = a.y;
+                        let bx = b.x;
+                        let by = b.y;
+
+                        if (ax <= 1.5 && ay <= 1.5 && ax >= -0.5 && ay >= -0.5) {
+                            ax = ax * canvas.width;
+                            ay = ay * canvas.height;
+                        }
+                        if (bx <= 1.5 && by <= 1.5 && bx >= -0.5 && by >= -0.5) {
+                            bx = bx * canvas.width;
+                            by = by * canvas.height;
+                        }
 
                         if (isMirrored) {
                             ax = canvas.width - ax;

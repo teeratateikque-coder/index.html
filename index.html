@@ -213,6 +213,7 @@
                 const kp = keypoints[idx];
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
+                // ลดค่า Threshold สกอร์ลงมาที่ 0.10 เพื่อให้จุดไวและหลุดยากขึ้นขณะขยับ
                 return score > 0.10 ? { x: kp.x, y: (kp.y <= 1.0001 ? kp.y * videoH : kp.y) } : null;
             };
 
@@ -226,27 +227,32 @@
             const leftAnkle = getPt(27);
             const rightAnkle = getPt(28);
 
+            // กรณีที่ 1: มองเห็นเต็มตัว (เห็นหัวและข้อเท้า)
             if (nose && leftAnkle && rightAnkle) {
                 const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
                 const pixelHeight = ankleY - nose.y;
                 if (pixelHeight > 40) return Math.round(pixelHeight * 0.38);
             }
 
+            // กรณีที่ 2: มองเห็นครึ่งตัวล่างถึงสะโพก
             if (nose && leftHip && rightHip) {
                 const hipY = (leftHip.y + rightHip.y) / 2;
                 const noseToHip = hipY - nose.y;
                 if (noseToHip > 30) return Math.round((noseToHip * 2.3) * 0.38);
             }
 
+            // กรณีที่ 3: เห็นแค่หัวจรดไหล่ (เช่น นั่งหน้าจอเหมือนในรูป 1000006992.jpg)
             if ((nose || leftEye || rightEye) && leftShoulder && rightShoulder) {
                 const topY = nose ? nose.y : (leftEye.y + rightEye.y) / 2;
                 const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
                 const headToShoulder = shoulderY - topY;
                 if (headToShoulder > 5) {
+                    // อัตราสัดส่วนสากล หัวจรดไหล่คิดเป็นประมาณ 13% ของความสูงทั้งหมด
                     return Math.round((headToShoulder * 7.69) * 0.38);
                 }
             }
 
+            // กรณีที่ 4: เห็นแค่โครงหน้าอย่างเดียว (Fallback ขั้นสุด)
             if (nose && (leftEye || rightEye)) {
                 const eyeY = leftEye ? leftEye.y : rightEye.y;
                 const eyeToNose = Math.abs(eyeY - nose.y);
@@ -342,6 +348,7 @@
                     document.getElementById("personStatus").innerText = "Person Detected";
                     let height = estimateHeight(pose.keypoints);
 
+                    // ปรับช่วงค่าให้รับตั้งแต่ความสูง 50cm เพื่อความยืดหยุ่นในการตรวจจับครึ่งตัว
                     if (height && height >= 50 && height <= 240) {
                         const weight = estimateWeight(height);
                         const meters = height / 100;

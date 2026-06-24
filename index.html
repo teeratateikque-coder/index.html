@@ -213,7 +213,7 @@
                 const kp = keypoints[idx];
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
-                return score > 0.15 ? { x: kp.x, y: (kp.y <= 1.0001 ? kp.y * videoH : kp.y) } : null;
+                return score > 0.10 ? { x: kp.x, y: (kp.y <= 1.0001 ? kp.y * videoH : kp.y) } : null;
             };
 
             const nose = getPt(0);
@@ -242,8 +242,16 @@
                 const topY = nose ? nose.y : (leftEye.y + rightEye.y) / 2;
                 const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
                 const headToShoulder = shoulderY - topY;
-                if (headToShoulder > 10) {
-                    return Math.round((headToShoulder * 7.2) * 0.38);
+                if (headToShoulder > 5) {
+                    return Math.round((headToShoulder * 7.69) * 0.38);
+                }
+            }
+
+            if (nose && (leftEye || rightEye)) {
+                const eyeY = leftEye ? leftEye.y : rightEye.y;
+                const eyeToNose = Math.abs(eyeY - nose.y);
+                if (eyeToNose > 2) {
+                    return Math.round((eyeToNose * 32) * 0.38);
                 }
             }
 
@@ -279,7 +287,7 @@
 
             points.forEach(point => {
                 const score = point.score !== undefined ? point.score : 0.5;
-                if (score > 0.15) {
+                if (score > 0.10) {
                     let drawX = point.x <= 1.0001 ? point.x * canvas.width : point.x;
                     let drawY = point.y <= 1.0001 ? point.y * canvas.height : point.y;
                     if (isMirrored) {
@@ -301,7 +309,7 @@
                 if (a && b) {
                     const aScore = a.score !== undefined ? a.score : 0.5;
                     const bScore = b.score !== undefined ? b.score : 0.5;
-                    if (aScore > 0.15 && bScore > 0.15) {
+                    if (aScore > 0.10 && bScore > 0.10) {
                         let ax = a.x <= 1.0001 ? a.x * canvas.width : a.x;
                         let ay = a.y <= 1.0001 ? a.y * canvas.height : a.y;
                         let bx = b.x <= 1.0001 ? b.x * canvas.width : b.x;
@@ -334,7 +342,7 @@
                     document.getElementById("personStatus").innerText = "Person Detected";
                     let height = estimateHeight(pose.keypoints);
 
-                    if (height && height >= 90 && height <= 240) {
+                    if (height && height >= 50 && height <= 240) {
                         const weight = estimateWeight(height);
                         const meters = height / 100;
                         const bmiValue = (weight / (meters * meters)).toFixed(1);

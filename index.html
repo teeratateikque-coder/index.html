@@ -6,8 +6,9 @@
     <title>AI Body Measurement System</title>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.2.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.2.0"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.2.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
 
     <style>
         * {
@@ -107,7 +108,7 @@
     <h1>AI Body Measurement System</h1>
 
     <div class="controls">
-        <select id="cameraSelect"></select>
+        <select id="cameraSelect" onchange="startSelectedCamera()"></select>
         <button id="startBtn" onclick="startSelectedCamera()">Start Camera</button>
     </div>
 
@@ -123,12 +124,13 @@
         <p>Detection: <span id="personStatus">Waiting...</span></p>
     </div>
 
-    <div class="status" id="status">Initializing...</div>
+    <div class="status" id="status">Initializing System...</div>
 
     <script>
         let detector;
-        let currentStream;
-        let animationFrameId;
+        let currentStream = null;
+        let animationFrameId = null;
+        let isDetecting = false;
 
         const video = document.getElementById("video");
         const canvas = document.getElementById("canvas");
@@ -154,7 +156,6 @@
 
         async function loadCameras() {
             try {
-                // Request initial permissions to get device labels
                 const initStream = await navigator.mediaDevices.getUserMedia({ video: true });
                 initStream.getTracks().forEach(track => track.stop());
 
@@ -166,7 +167,6 @@
                     const option = document.createElement("option");
                     option.value = device.deviceId;
                     
-                    // Store facing information in data attribute for accurate fallback switching
                     const label = device.label.toLowerCase();
                     if (label.includes("back") || label.includes("rear") || label.includes("environment")) {
                         option.setAttribute("data-facing", "environment");
@@ -183,7 +183,6 @@
                 }
             } catch (err) {
                 console.error("Error listing cameras:", err);
-                // Fallback options if enumerateDevices is blocked
                 cameraSelect.innerHTML = `
                     <option value="user" data-facing="user">Front Camera</option>
                     <option value="environment" data-facing="environment">Rear Camera</option>
@@ -193,13 +192,22 @@
         }
 
         async function startSelectedCamera() {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            
-            if (currentStream) {
-                currentStream.getTracks().forEach(track => track.stop());
+            isDetecting = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
             }
             
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => {
+                    track.stop();
+                });
+                currentStream = null;
+            }
+            
+            video.pause();
             video.srcObject = null;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             const selectedOption = cameraSelect.options[cameraSelect.selectedIndex];
             if (!selectedOption) return;
@@ -207,13 +215,11 @@
             const deviceId = selectedOption.value;
             const facingMode = selectedOption.getAttribute("data-facing");
 
-            // Multi-stage robust constraints to prevent mobile browser deviceId bugs
             let constraints = {
                 audio: false,
                 video: { deviceId: { exact: deviceId } }
             };
 
-            // If it's a generic fallback value
             if (deviceId === "user" || deviceId === "environment") {
                 constraints.video = { facingMode: { ideal: deviceId } };
             }
@@ -221,15 +227,13 @@
             try {
                 currentStream = await navigator.mediaDevices.getUserMedia(constraints);
             } catch (err) {
-                console.warn("Primary deviceId constraint failed. Trying facingMode fallback...", err);
+                console.warn("Trying fallback facingMode constraints...");
                 try {
-                    // Fallback using explicit facingMode instead of deviceId
                     currentStream = await navigator.mediaDevices.getUserMedia({
                         audio: false,
                         video: { facingMode: { ideal: facingMode } }
                     });
                 } catch (fallbackErr) {
-                    console.error("All constraints failed. Using default camera.", fallbackErr);
                     currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                 }
             }
@@ -237,12 +241,13 @@
             video.srcObject = currentStream;
             
             await new Promise((resolve) => {
-                video.onloadedmetadata = () => resolve();
+                video.onloadedmetadata = () => {
+                    resolve();
+                };
             });
 
             await video.play();
 
-            // Handle mirror styling dynamically based on the track configuration
             const activeTrack = currentStream.getVideoTracks()[0];
             const settings = activeTrack.getSettings ? activeTrack.getSettings() : {};
             const actualFacing = settings.facingMode || facingMode;
@@ -256,6 +261,7 @@
             canvas.width = video.videoWidth || 640;
             canvas.height = video.videoHeight || 480;
 
+            isDetecting = true;
             detect();
         }
 
@@ -369,7 +375,7 @@
         }
 
         async function detect() {
-            if (video.readyState < 2) {
+            if (!isDetecting || video.readyState < 2) {
                 animationFrameId = requestAnimationFrame(detect);
                 return;
             }
@@ -410,7 +416,9 @@
                 console.error("Detection error:", err);
             }
 
-            animationFrameId = requestAnimationFrame(detect);
+            if (isDetecting) {
+                animationFrameId = requestAnimationFrame(detect);
+            }
         }
 
         initSystem();

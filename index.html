@@ -208,11 +208,12 @@
         }
 
         function estimateHeight(keypoints) {
+            const videoH = video.videoHeight || 720;
             const getPt = (idx) => {
                 const kp = keypoints[idx];
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
-                return score > 0.15 ? { x: kp.x, y: (kp.y <= 1 ? kp.y * video.videoHeight : kp.y) } : null;
+                return score > 0.15 ? { x: kp.x, y: (kp.y <= 1.0001 ? kp.y * videoH : kp.y) } : null;
             };
 
             const nose = getPt(0);
@@ -258,7 +259,7 @@
 
         function drawPoint(x, y) {
             ctx.beginPath();
-            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.arc(x, y, 6, 0, 2 * Math.PI);
             ctx.fillStyle = "red";
             ctx.fill();
         }
@@ -267,7 +268,7 @@
             ctx.beginPath();
             ctx.moveTo(a.x, a.y);
             ctx.lineTo(b.x, b.y);
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 3;
             ctx.strokeStyle = "lime";
             ctx.stroke();
         }
@@ -279,8 +280,8 @@
             points.forEach(point => {
                 const score = point.score !== undefined ? point.score : 0.5;
                 if (score > 0.15) {
-                    let drawX = point.x <= 1 ? point.x * canvas.width : point.x;
-                    let drawY = point.y <= 1 ? point.y * canvas.height : point.y;
+                    let drawX = point.x <= 1.0001 ? point.x * canvas.width : point.x;
+                    let drawY = point.y <= 1.0001 ? point.y * canvas.height : point.y;
                     if (isMirrored) {
                         drawX = canvas.width - drawX;
                     }
@@ -301,10 +302,10 @@
                     const aScore = a.score !== undefined ? a.score : 0.5;
                     const bScore = b.score !== undefined ? b.score : 0.5;
                     if (aScore > 0.15 && bScore > 0.15) {
-                        let ax = a.x <= 1 ? a.x * canvas.width : a.x;
-                        let ay = a.y <= 1 ? a.y * canvas.height : a.y;
-                        let bx = b.x <= 1 ? b.x * canvas.width : b.x;
-                        let by = b.y <= 1 ? b.y * canvas.height : b.y;
+                        let ax = a.x <= 1.0001 ? a.x * canvas.width : a.x;
+                        let ay = a.y <= 1.0001 ? a.y * canvas.height : a.y;
+                        let bx = b.x <= 1.0001 ? b.x * canvas.width : b.x;
+                        let by = b.y <= 1.0001 ? b.y * canvas.height : b.y;
 
                         if (isMirrored) {
                             ax = canvas.width - ax;

@@ -215,49 +215,59 @@
                 const kp = keypoints[idx];
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
-                return score > 0.01 ? { x: kp.x, y: kp.y } : null;
+                return score > 0.001 ? { x: kp.x, y: kp.y } : null;
             };
 
             const nose = getPt(0);
             const leftEye = getPt(1);
             const rightEye = getPt(2);
+            const leftEar = getPt(7);
+            const rightEar = getPt(8);
             const leftShoulder = getPt(11);
             const rightShoulder = getPt(12);
             const leftHip = getPt(23);
             const rightHip = getPt(24);
+            const leftKnee = getPt(25);
+            const rightKnee = getPt(26);
             const leftAnkle = getPt(27);
             const rightAnkle = getPt(28);
 
-            // 1. เห็นเต็มตัว (จากหัวถึงข้อเท้า)
-            if (nose && leftAnkle && rightAnkle) {
-                const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
-                const pixelHeight = ankleY - nose.y;
-                if (pixelHeight > 30) return Math.round(pixelHeight * 0.38);
-            }
+            const topHeadY = nose ? nose.y : (leftEye && rightEye ? (leftEye.y + rightEye.y)/2 : (leftEar && rightEar ? (leftEar.y + rightEar.y)/2 : null));
 
-            // 2. เห็นครึ่งตัวล่าง/ครึ่งตัวบนระดับสะโพก (จากหัวถึงสะโพก)
-            if (nose && leftHip && rightHip) {
-                const hipY = (leftHip.y + rightHip.y) / 2;
-                const noseToHip = hipY - nose.y;
-                if (noseToHip > 20) return Math.round((noseToHip * 2.15) * 0.38);
-            }
-
-            // 3. เห็นเฉพาะครึ่งตัวบน นั่งหน้ากล้อง (จากหัวถึงหัวไหล่)
-            if ((nose || leftEye || rightEye) && leftShoulder && rightShoulder) {
-                const topY = nose ? nose.y : (leftEye.y + rightEye.y) / 2;
-                const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-                const headToShoulder = shoulderY - topY;
-                if (headToShoulder > 5) {
-                    return Math.round((headToShoulder * 7.4) * 0.38);
+            if (topHeadY !== null) {
+                // 1. เต็มตัว (หัวถึงข้อเท้า) -> สัดส่วน ~ 100% ของความสูงจริง
+                if (leftAnkle && rightAnkle) {
+                    const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
+                    const pixelHeight = ankleY - topHeadY;
+                    if (pixelHeight > 30) return Math.round(pixelHeight * 0.38);
                 }
-            }
 
-            // 4. เห็นเฉพาะใบหน้า
-            if (nose && (leftEye || rightEye)) {
-                const eyeY = leftEye ? leftEye.y : rightEye.y;
-                const eyeToNose = Math.abs(eyeY - nose.y);
-                if (eyeToNose > 2) {
-                    return Math.round((eyeToNose * 30) * 0.38);
+                // 2. ครึ่งตัวล่างถึงเข่า (หัวถึงเข่า) -> เข่าขึ้นไปคิดเป็นสัดส่วนประมาณ 75% ของร่างกาย
+                if (leftKnee && rightKnee) {
+                    const kneeY = (leftKnee.y + rightKnee.y) / 2;
+                    const pixelHeight = kneeY - topHeadY;
+                    if (pixelHeight > 25) return Math.round((pixelHeight / 0.75) * 0.38);
+                }
+
+                // 3. ครึ่งตัวบนระดับสะโพก (หัวถึงสะโพก) -> สะโพกขึ้นไปคิดเป็นสัดส่วนประมาณ 52% ของร่างกาย
+                if (leftHip && rightHip) {
+                    const hipY = (leftHip.y + rightHip.y) / 2;
+                    const pixelHeight = hipY - topHeadY;
+                    if (pixelHeight > 20) return Math.round((pixelHeight / 0.52) * 0.38);
+                }
+
+                // 4. ครึ่งตัวบนระดับอก/ไหล่ (หัวถึงไหล่) -> ไหล่ขึ้นไปคิดเป็นสัดส่วนประมาณ 13% ของร่างกาย
+                if (leftShoulder && rightShoulder) {
+                    const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+                    const pixelHeight = shoulderY - topHeadY;
+                    if (pixelHeight > 5) return Math.round((pixelHeight / 0.13) * 0.38);
+                }
+
+                // 5. เห็นเฉพาะใบหน้า (ตาถึงจมูก) -> ระยะตาถึงจมูกคิดเป็นสัดส่วนประมาณ 3.2% ของร่างกาย
+                if (nose && (leftEye || rightEye)) {
+                    const eyeY = leftEye ? leftEye.y : rightEye.y;
+                    const pixelHeight = Math.abs(eyeY - nose.y);
+                    if (pixelHeight > 1) return Math.round((pixelHeight / 0.032) * 0.38);
                 }
             }
             return null;
@@ -292,7 +302,7 @@
 
             points.forEach(point => {
                 const score = point.score !== undefined ? point.score : 0.5;
-                if (score > 0.01) {
+                if (score > 0.001) {
                     let drawX = point.x;
                     let drawY = point.y;
                     
@@ -315,7 +325,7 @@
                 if (a && b) {
                     const aScore = a.score !== undefined ? a.score : 0.5;
                     const bScore = b.score !== undefined ? b.score : 0.5;
-                    if (aScore > 0.01 && bScore > 0.01) {
+                    if (aScore > 0.001 && bScore > 0.001) {
                         let ax = a.x;
                         let ay = a.y;
                         let bx = b.x;

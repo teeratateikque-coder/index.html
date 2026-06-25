@@ -5,10 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Body Measurement System</title>
 
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@3.11.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@3.11.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@3.11.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.0.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
 
     <style>
         * {
@@ -134,13 +133,18 @@
         async function initSystem() {
             try {
                 document.getElementById("status").innerText = "Loading AI Model...";
-                await tf.setBackend('webgl');
+                
+                // ใช้ Runtime MediaPipe เเทน tfjs เพื่อความเสถียรบนเบราว์เซอร์สมาร์ทโฟน
                 detector = await poseDetection.createDetector(
                     poseDetection.SupportedModels.BlazePose,
-                    { runtime: 'tfjs', modelType: 'full' }
+                    {
+                        runtime: 'mediapipe',
+                        modelType: 'full',
+                        solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose'
+                    }
                 );
-                document.getElementById("status").innerText = "AI System Ready";
                 
+                document.getElementById("status").innerText = "AI System Ready";
                 await startCamera(currentFacingMode);
             } catch (err) {
                 document.getElementById("status").innerText = "Init Failed: " + err.message;
@@ -218,6 +222,7 @@
                 if (score > 0.10) {
                     let rx = kp.x;
                     let ry = kp.y;
+                    // ปลดล็อกระบบแปลงพิกัดอัตโนมัติ ไม่ว่าจะส่งแบบสัดส่วน 0-1 หรือพิกเซลจริง ป้องกันจุดหลุดขอบเฟรมตอนยืนตรง
                     if (rx <= 1.5 && ry <= 1.5 && rx >= -0.5 && ry >= -0.5) {
                         rx = rx * videoW;
                         ry = ry * videoH;
@@ -237,18 +242,21 @@
             const leftAnkle = getPt(27);
             const rightAnkle = getPt(28);
 
+            // 1. ตรวจสอบเต็มตัว (จากหัวถึงข้อเท้า)
             if (nose && leftAnkle && rightAnkle) {
                 const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
                 const pixelHeight = ankleY - nose.y;
                 if (pixelHeight > 30) return Math.round(pixelHeight * 0.38);
             }
 
+            // 2. กรณีเห็นถึงสะโพก
             if (nose && leftHip && rightHip) {
                 const hipY = (leftHip.y + rightHip.y) / 2;
                 const noseToHip = hipY - nose.y;
                 if (noseToHip > 20) return Math.round((noseToHip * 2.3) * 0.38);
             }
 
+            // 3. กรณีเห็นครึ่งตัวบน (หัวถึงไหล่)
             if ((nose || leftEye || rightEye) && leftShoulder && rightShoulder) {
                 const topY = nose ? nose.y : (leftEye.y + rightEye.y) / 2;
                 const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
@@ -258,6 +266,7 @@
                 }
             }
 
+            // 4. กรณีเห็นแค่ใบหน้า
             if (nose && (leftEye || rightEye)) {
                 const eyeY = leftEye ? leftEye.y : rightEye.y;
                 const eyeToNose = Math.abs(eyeY - nose.y);

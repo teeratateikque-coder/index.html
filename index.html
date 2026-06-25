@@ -134,7 +134,6 @@
             try {
                 document.getElementById("status").innerText = "Loading AI Model...";
                 
-                // ใช้ Runtime MediaPipe เเทน tfjs เพื่อความเสถียรบนเบราว์เซอร์สมาร์ทโฟน
                 detector = await poseDetection.createDetector(
                     poseDetection.SupportedModels.BlazePose,
                     {
@@ -212,24 +211,12 @@
         }
 
         function estimateHeight(keypoints) {
-            const videoW = video.videoWidth || 640;
-            const videoH = video.videoHeight || 480;
-            
             const getPt = (idx) => {
                 const kp = keypoints[idx];
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
-                if (score > 0.10) {
-                    let rx = kp.x;
-                    let ry = kp.y;
-                    // ปลดล็อกระบบแปลงพิกัดอัตโนมัติ ไม่ว่าจะส่งแบบสัดส่วน 0-1 หรือพิกเซลจริง ป้องกันจุดหลุดขอบเฟรมตอนยืนตรง
-                    if (rx <= 1.5 && ry <= 1.5 && rx >= -0.5 && ry >= -0.5) {
-                        rx = rx * videoW;
-                        ry = ry * videoH;
-                    }
-                    return { x: rx, y: ry };
-                }
-                return null;
+                // ดึงค่า Absolute Pixel จาก MediaPipe รันไทม์มาใช้คำนวณโดยตรง ไม่ใช้สูตรกรองซ้อนสเกล
+                return score > 0.10 ? { x: kp.x, y: kp.y } : null;
             };
 
             const nose = getPt(0);
@@ -310,10 +297,6 @@
                     let drawX = point.x;
                     let drawY = point.y;
                     
-                    if (drawX <= 1.5 && drawY <= 1.5 && drawX >= -0.5 && drawY >= -0.5) {
-                        drawX = drawX * canvas.width;
-                        drawY = drawY * canvas.height;
-                    }
                     if (isMirrored) {
                         drawX = canvas.width - drawX;
                     }
@@ -338,15 +321,6 @@
                         let ay = a.y;
                         let bx = b.x;
                         let by = b.y;
-
-                        if (ax <= 1.5 && ay <= 1.5 && ax >= -0.5 && ay >= -0.5) {
-                            ax = ax * canvas.width;
-                            ay = ay * canvas.height;
-                        }
-                        if (bx <= 1.5 && by <= 1.5 && bx >= -0.5 && by >= -0.5) {
-                            bx = bx * canvas.width;
-                            by = by * canvas.height;
-                        }
 
                         if (isMirrored) {
                             ax = canvas.width - ax;

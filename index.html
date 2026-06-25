@@ -215,8 +215,7 @@
                 const kp = keypoints[idx];
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
-                // ดึงค่า Absolute Pixel จาก MediaPipe รันไทม์มาใช้คำนวณโดยตรง ไม่ใช้สูตรกรองซ้อนสเกล
-                return score > 0.10 ? { x: kp.x, y: kp.y } : null;
+                return score > 0.01 ? { x: kp.x, y: kp.y } : null;
             };
 
             const nose = getPt(0);
@@ -229,21 +228,18 @@
             const leftAnkle = getPt(27);
             const rightAnkle = getPt(28);
 
-            // 1. ตรวจสอบเต็มตัว (จากหัวถึงข้อเท้า)
             if (nose && leftAnkle && rightAnkle) {
                 const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
                 const pixelHeight = ankleY - nose.y;
                 if (pixelHeight > 30) return Math.round(pixelHeight * 0.38);
             }
 
-            // 2. กรณีเห็นถึงสะโพก
             if (nose && leftHip && rightHip) {
                 const hipY = (leftHip.y + rightHip.y) / 2;
                 const noseToHip = hipY - nose.y;
                 if (noseToHip > 20) return Math.round((noseToHip * 2.3) * 0.38);
             }
 
-            // 3. กรณีเห็นครึ่งตัวบน (หัวถึงไหล่)
             if ((nose || leftEye || rightEye) && leftShoulder && rightShoulder) {
                 const topY = nose ? nose.y : (leftEye.y + rightEye.y) / 2;
                 const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
@@ -253,7 +249,6 @@
                 }
             }
 
-            // 4. กรณีเห็นแค่ใบหน้า
             if (nose && (leftEye || rightEye)) {
                 const eyeY = leftEye ? leftEye.y : rightEye.y;
                 const eyeToNose = Math.abs(eyeY - nose.y);
@@ -293,7 +288,7 @@
 
             points.forEach(point => {
                 const score = point.score !== undefined ? point.score : 0.5;
-                if (score > 0.10) {
+                if (score > 0.01) {
                     let drawX = point.x;
                     let drawY = point.y;
                     
@@ -316,7 +311,7 @@
                 if (a && b) {
                     const aScore = a.score !== undefined ? a.score : 0.5;
                     const bScore = b.score !== undefined ? b.score : 0.5;
-                    if (aScore > 0.10 && bScore > 0.10) {
+                    if (aScore > 0.01 && bScore > 0.01) {
                         let ax = a.x;
                         let ay = a.y;
                         let bx = b.x;

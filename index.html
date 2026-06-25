@@ -228,32 +228,36 @@
             const leftAnkle = getPt(27);
             const rightAnkle = getPt(28);
 
+            // 1. เห็นเต็มตัว (จากหัวถึงข้อเท้า)
             if (nose && leftAnkle && rightAnkle) {
                 const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
                 const pixelHeight = ankleY - nose.y;
                 if (pixelHeight > 30) return Math.round(pixelHeight * 0.38);
             }
 
+            // 2. เห็นครึ่งตัวล่าง/ครึ่งตัวบนระดับสะโพก (จากหัวถึงสะโพก)
             if (nose && leftHip && rightHip) {
                 const hipY = (leftHip.y + rightHip.y) / 2;
                 const noseToHip = hipY - nose.y;
-                if (noseToHip > 20) return Math.round((noseToHip * 2.3) * 0.38);
+                if (noseToHip > 20) return Math.round((noseToHip * 2.15) * 0.38);
             }
 
+            // 3. เห็นเฉพาะครึ่งตัวบน นั่งหน้ากล้อง (จากหัวถึงหัวไหล่)
             if ((nose || leftEye || rightEye) && leftShoulder && rightShoulder) {
                 const topY = nose ? nose.y : (leftEye.y + rightEye.y) / 2;
                 const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
                 const headToShoulder = shoulderY - topY;
                 if (headToShoulder > 5) {
-                    return Math.round((headToShoulder * 7.69) * 0.38);
+                    return Math.round((headToShoulder * 7.4) * 0.38);
                 }
             }
 
+            // 4. เห็นเฉพาะใบหน้า
             if (nose && (leftEye || rightEye)) {
                 const eyeY = leftEye ? leftEye.y : rightEye.y;
                 const eyeToNose = Math.abs(eyeY - nose.y);
                 if (eyeToNose > 2) {
-                    return Math.round((eyeToNose * 32) * 0.38);
+                    return Math.round((eyeToNose * 30) * 0.38);
                 }
             }
             return null;

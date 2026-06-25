@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Body Measurement System</title>
 
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.2.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.2.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@3.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@3.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@3.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.0.0"></script>
 
     <style>
         * {
@@ -215,7 +216,6 @@
                 if (!kp) return null;
                 const score = kp.score !== undefined ? kp.score : 0.5;
                 if (score > 0.10) {
-                    // ปรับปรุงสูตรแปลงพิกัด: ถ้าระบบส่งค่ามาเป็นเปอร์เซ็นต์ (0-1.5) ให้คูณแปลงเป็นพิกเซล หากส่งมาเป็นพิกเซลจริงอยู่แล้วให้ใช้ค่านั้นได้เลย
                     let rx = kp.x;
                     let ry = kp.y;
                     if (rx <= 1.5 && ry <= 1.5 && rx >= -0.5 && ry >= -0.5) {
@@ -237,21 +237,18 @@
             const leftAnkle = getPt(27);
             const rightAnkle = getPt(28);
 
-            // 1. เห็นเต็มตัว (ยืนตัวตรงชิดขอบก็สามารถวัดได้แล้ว)
             if (nose && leftAnkle && rightAnkle) {
                 const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
                 const pixelHeight = ankleY - nose.y;
                 if (pixelHeight > 30) return Math.round(pixelHeight * 0.38);
             }
 
-            // 2. เห็นครึ่งตัวล่างถึงสะโพก
             if (nose && leftHip && rightHip) {
                 const hipY = (leftHip.y + rightHip.y) / 2;
                 const noseToHip = hipY - nose.y;
                 if (noseToHip > 20) return Math.round((noseToHip * 2.3) * 0.38);
             }
 
-            // 3. เห็นครึ่งตัวบน นั่งหน้าจอ (หัวถึงไหล่)
             if ((nose || leftEye || rightEye) && leftShoulder && rightShoulder) {
                 const topY = nose ? nose.y : (leftEye.y + rightEye.y) / 2;
                 const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
@@ -261,7 +258,6 @@
                 }
             }
 
-            // 4. เห็นแค่โครงหน้าอย่างเดียว
             if (nose && (leftEye || rightEye)) {
                 const eyeY = leftEye ? leftEye.y : rightEye.y;
                 const eyeToNose = Math.abs(eyeY - nose.y);
@@ -305,7 +301,6 @@
                     let drawX = point.x;
                     let drawY = point.y;
                     
-                    // ปรับเงื่อนไขการแปลงสเกลให้แมปปิ้งกับ Canvas ได้อย่างแม่นยำแม้จะยืนชนขอบเฟรมก็ตาม
                     if (drawX <= 1.5 && drawY <= 1.5 && drawX >= -0.5 && drawY >= -0.5) {
                         drawX = drawX * canvas.width;
                         drawY = drawY * canvas.height;
